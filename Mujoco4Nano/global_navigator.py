@@ -9,9 +9,9 @@ from scipy.spatial.transform import Rotation as R
 
 
 class PIDController:
-    """简单的PID控制器"""
+    """简单的PID控制器 (带抗饱和)"""
 
-    def __init__(self, kp, ki, kd, output_limits=None):
+    def __init__(self, kp, ki, kd, output_limits=None, integral_limits=None):
         """
         初始化PID控制器
 
@@ -20,11 +20,13 @@ class PIDController:
             ki: 积分增益
             kd: 微分增益
             output_limits: 输出限制 (min, max), None表示不限制
+            integral_limits: 积分项限制 (min, max), 防止积分饱和
         """
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.output_limits = output_limits
+        self.integral_limits = integral_limits
 
         self.integral = 0.0
         self.last_error = 0.0
@@ -44,8 +46,10 @@ class PIDController:
         # 比例项
         p_term = self.kp * error
 
-        # 积分项
+        # 积分项 (带抗饱和限制)
         self.integral += error * dt
+        if self.integral_limits is not None:
+            self.integral = np.clip(self.integral, self.integral_limits[0], self.integral_limits[1])
         i_term = self.ki * self.integral
 
         # 微分项
@@ -101,25 +105,28 @@ class GlobalNavigator:
         # PID控制器参数
         # 位置控制 (x, y)
         self.pid_x = PIDController(
-            kp=1.0,    # 位置比例增益
-            ki=0.01,   # 位置积分增益
-            kd=0.1,    # 位置微分增益
-            output_limits=(-0.8, 0.8)  # 速度限制 m/s
+            kp=1.5,    # 位置比例增益 (增大以提高响应速度)
+            ki=0.05,   # 位置积分增益 (增大以消除稳态误差)
+            kd=0.05,   # 位置微分增益 (减小以减少振荡)
+            output_limits=(-0.8, 0.8),  # 速度限制 m/s
+            integral_limits=(-2.0, 2.0)  # 积分限制,防止饱和
         )
 
         self.pid_y = PIDController(
-            kp=1.0,
-            ki=0.01,
-            kd=0.1,
-            output_limits=(-0.8, 0.8)
+            kp=1.5,
+            ki=0.05,
+            kd=0.05,
+            output_limits=(-0.8, 0.8),
+            integral_limits=(-2.0, 2.0)
         )
 
         # 姿态控制 (yaw角)
         self.pid_yaw = PIDController(
-            kp=2.0,    # 角度比例增益
-            ki=0.01,   # 角度积分增益
-            kd=0.2,    # 角度微分增益
-            output_limits=(-2.0, 2.0)  # 角速度限制 rad/s
+            kp=3.0,    # 角度比例增益 (增大以提高响应)
+            ki=0.02,   # 角度积分增益
+            kd=0.1,    # 角度微分增益
+            output_limits=(-2.0, 2.0),  # 角速度限制 rad/s
+            integral_limits=(-1.0, 1.0)  # 积分限制
         )
 
         # 容差阈值
@@ -182,6 +189,10 @@ class GlobalNavigator:
         """
         计算控制输出 (在世界坐标系下)
 
+        采用分阶段控制策略：
+        1. 先移动到目标位置（不控制姿态）
+        2. 位置到达后，再旋转到目标姿态
+
         返回:
             (vx_world, vy_world, omega) 世界坐标系下的速度
         """
@@ -214,15 +225,24 @@ class GlobalNavigator:
             print(f"到达目标! 位置误差={error_distance*100:.2f}cm, 姿态误差={abs(error_yaw)*180/np.pi:.2f}°")
             return 0.0, 0.0, 0.0
 
-        # 位置PID控制 (在世界坐标系)
-        vx_world = self.pid_x.compute(error_pos[0], dt)
-        vy_world = self.pid_y.compute(error_pos[1], dt)
-
-        # 姿态PID控制
-        if self.target_yaw is not None:
-            omega = self.pid_yaw.compute(error_yaw, dt)
+        # 分阶段控制策略
+        # 阶段1: 位置未到达时，只控制位置，不控制姿态
+        if not position_reached:
+            # 位置PID控制 (在世界坐标系)
+            vx_world = self.pid_x.compute(error_pos[0], dt)
+            vy_world = self.pid_y.compute(error_pos[1], dt)
+            omega = 0.0  # 移动阶段不旋转
+        # 阶段2: 位置到达后，只控制姿态
         else:
-            omega = 0.0
+            # 位置到达，停止平移
+            vx_world = 0.0
+            vy_world = 0.0
+
+            # 姿态PID控制
+            if self.target_yaw is not None:
+                omega = self.pid_yaw.compute(error_yaw, dt)
+            else:
+                omega = 0.0
 
         return vx_world, vy_world, omega
 
