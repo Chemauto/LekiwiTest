@@ -131,7 +131,7 @@ mujoco.mj_step(model, data)
 cd Mujoco4Nano
 
 # 基础运动测试
-python test_omni_viewer.py
+python test_kinematics.py
 
 # 选择演示模式:
 # 1 - 全向运动自动演示（9种运动模式）
