@@ -41,11 +41,6 @@ venv.bak/
 .ipynb_checkpoints
 *.ipynb
 
-# MuJoCo
-*.xml
-*.msh
-*.stl
-*.obj
 
 # OS
 .DS_Store
