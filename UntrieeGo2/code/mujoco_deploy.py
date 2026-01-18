@@ -114,15 +114,31 @@ class MuJoCoPolicy:
 class MuJoCoDemo:
     """MuJoCo交互式演示"""
 
-    def __init__(self, model_path: str, policy_path: str):
+    def __init__(self, model_path: str, policy_path: str, decimation: int = 1):
+        """
+        Args:
+            model_path: MuJoCo XML路径
+            policy_path: 策略文件路径
+            decimation: 控制频率降低倍数（默认1=每步都控制）
+                       IsaacLab常用值: 2, 4
+        """
         print("\n" + "=" * 60)
         print("MuJoCo策略部署")
         print("=" * 60)
+
+        self.decimation = decimation
+        self.step_count = 0
 
         # 加载模型
         print(f"\n[1] 加载MuJoCo模型...")
         self.model = mujoco.MjModel.from_xml_path(model_path)
         self.data = mujoco.MjData(self.model)
+
+        # 显示时间步长信息
+        print(f"    时间步长: {self.model.opt.timestep}")
+        print(f"    物理频率: {1/self.model.opt.timestep:.1f} Hz")
+        print(f"    Decimation: {self.decimation}")
+        print(f"    控制频率: {1/self.model.opt.timestep/self.decimation:.1f} Hz")
 
         # 加载策略
         print(f"[2] 加载策略...")
@@ -171,9 +187,9 @@ class MuJoCoDemo:
         ])
 
         # PD增益（从IsaacLab DCMotorCfg）
-        # 增加kp以提高响应速度
-        self.kp = 50.0  # 从 25.0 增加到 50.0
-        self.kd = 1.0   # 从 0.5 增加到 1.0
+        # 恢复到原始值
+        self.kp = 25.0
+        self.kd = 0.5
 
         self.last_action = np.zeros(12)
 
@@ -251,45 +267,49 @@ class MuJoCoDemo:
 
     def step(self):
         """执行一步控制"""
-        # 获取观测
-        obs = self.get_observation()
+        self.step_count += 1
 
-        # 获取动作（FL, FR, RL, RR顺序，IsaacLab训练顺序）
-        isaaclab_action = self.policy.get_action(obs)
-        self.last_action = isaaclab_action.copy()
+        # 根据decimation决定是否更新动作
+        if self.step_count % self.decimation == 0:
+            # 获取观测
+            obs = self.get_observation()
 
-        # 将IsaacLab顺序(FL,FR,RL,RR)映射到MuJoCo actuator顺序(FR,FL,RR,RL)
-        # FL(0-2) -> actuator 3-5
-        # FR(3-5) -> actuator 0-2
-        # RL(6-8) -> actuator 9-11
-        # RR(9-11) -> actuator 6-8
-        mujoco_action = np.zeros(12)
-        mujoco_action[0:3] = isaaclab_action[3:6]    # FR
-        mujoco_action[3:6] = isaaclab_action[0:3]    # FL
-        mujoco_action[6:9] = isaaclab_action[9:12]   # RR
-        mujoco_action[9:12] = isaaclab_action[6:9]   # RL
+            # 获取动作（FL, FR, RL, RR顺序，IsaacLab训练顺序）
+            isaaclab_action = self.policy.get_action(obs)
+            self.last_action = isaaclab_action.copy()
 
-        # 调试输出（前100步）
-        if not hasattr(self, '_step_count'):
-            self._step_count = 0
-        self._step_count += 1
+            # 将IsaacLab顺序(FL,FR,RL,RR)映射到MuJoCo actuator顺序(FR,FL,RR,RL)
+            mujoco_action = np.zeros(12)
+            mujoco_action[0:3] = isaaclab_action[3:6]    # FR
+            mujoco_action[3:6] = isaaclab_action[0:3]    # FL
+            mujoco_action[6:9] = isaaclab_action[9:12]   # RR
+            mujoco_action[9:12] = isaaclab_action[6:9]   # RL
 
-        if self._step_count <= 100 and self._step_count % 20 == 0:
-            fl_pos = self.data.qpos[8:11]  # FL joints 1-3 -> qpos 8-10
-            fr_pos = self.data.qpos[11:14] # FR joints 4-6 -> qpos 11-13
+            # 调试输出（前100步）
+            if self.step_count <= 100 and self.step_count % 20 == 0:
+                fl_pos = self.data.qpos[8:11]  # FL joints 1-3 -> qpos 8-10
+                fr_pos = self.data.qpos[11:14] # FR joints 4-6 -> qpos 11-13
 
-            quat = self.data.qpos[3:7].copy()
-            quat_xyzw = np.array([quat[1], quat[2], quat[3], quat[0]])
-            rotation = R.from_quat(quat_xyzw)
-            proj_grav = rotation.inv().apply(np.array([0.0, 0.0, -1.0]))
+                quat = self.data.qpos[3:7].copy()
+                quat_xyzw = np.array([quat[1], quat[2], quat[3], quat[0]])
+                rotation = R.from_quat(quat_xyzw)
+                proj_grav = rotation.inv().apply(np.array([0.0, 0.0, -1.0]))
 
-            print(f"[调试] 步骤{self._step_count}:")
-            print(f"  IsaacLab动作(FL): {isaaclab_action[:3]}")
-            print(f"  IsaacLab动作(FR): {isaaclab_action[3:6]}")
-            print(f"  关节(FL): {fl_pos}")
-            print(f"  关节(FR): {fr_pos}")
-            print(f"  基座高度: {self.data.qpos[2]:.3f}")
-            print(f"  投影重力: {proj_grav}")
+                print(f"[调试] 步骤{self.step_count}:")
+                print(f"  IsaacLab动作(FL): {isaaclab_action[:3]}")
+                print(f"  IsaacLab动作(FR): {isaaclab_action[3:6]}")
+                print(f"  关节(FL): {fl_pos}")
+                print(f"  关节(FR): {fr_pos}")
+                print(f"  基座高度: {self.data.qpos[2]:.3f}")
+                print(f"  投影重力: {proj_grav}")
+        else:
+            # 使用上一个动作
+            isaaclab_action = self.last_action
+            mujoco_action = np.zeros(12)
+            mujoco_action[0:3] = isaaclab_action[3:6]
+            mujoco_action[3:6] = isaaclab_action[0:3]
+            mujoco_action[6:9] = isaaclab_action[9:12]
+            mujoco_action[9:12] = isaaclab_action[6:9]
 
         # 应用控制到actuators（FR, FL, RR, RL顺序）
         for i in range(12):
@@ -484,7 +504,10 @@ def main():
     model_path = "/home/robot/work/LekiwiTest/UntrieeGo2/model/go2/scene.xml"
     policy_path = "/home/robot/work/LekiwiTest/UntrieeGo2/policy/Rough_Walk_policy4Mujoco.pt"
 
-    demo = MuJoCoDemo(model_path, policy_path)
+    # 使用decimation=2来匹配IsaacLab的控制频率
+    # 如果MuJoCo timestep=0.002 (500Hz)，decimation=2 → 250Hz控制
+    # IsaacLab通常使用60-120Hz控制频率
+    demo = MuJoCoDemo(model_path, policy_path, decimation=4)
     demo.run()
 
 
