@@ -2,6 +2,10 @@
 Xbox手柄模拟器主界面
 组合所有UI组件，提供完整的手柄外观和交互
 """
+import pickle
+import os
+import time
+import atexit
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QFrame, QSplitter)
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
@@ -11,6 +15,23 @@ from .components.button import JoystickButton, ShoulderButton, SmallButton
 from .components.stick import AnalogStick
 from .components.trigger import Trigger
 from .components.dpad import DPad
+
+# 状态文件路径
+STATE_FILE = "/tmp/virtual_joystick_state.pkl"
+
+
+def cleanup_state_file():
+    """退出时清理状态文件"""
+    try:
+        if os.path.exists(STATE_FILE):
+            os.remove(STATE_FILE)
+            print(f"已清理状态文件: {STATE_FILE}")
+    except Exception as e:
+        pass
+
+
+# 注册退出清理函数
+atexit.register(cleanup_state_file)
 
 
 class JoystickUI(QWidget):
@@ -35,6 +56,11 @@ class JoystickUI(QWidget):
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._update_status_display)
         self.update_timer.start(100)  # 每100ms更新一次状态显示
+
+        # 设置定时器定期写入状态文件（即使没有用户操作）
+        self.state_file_timer = QTimer()
+        self.state_file_timer.timeout.connect(self._write_state_file)
+        self.state_file_timer.start(100)  # 每100ms写入一次状态文件
 
     def init_ui(self):
         """初始化UI"""
@@ -74,6 +100,23 @@ class JoystickUI(QWidget):
         """状态更新时调用"""
         self.state_updated.emit()
         self._update_status_display()
+        self._write_state_file()
+
+    def _write_state_file(self):
+        """将手柄状态写入文件，供其他进程读取"""
+        try:
+            state = self.joystick.get_state()
+            # 提取需要的数据
+            state_data = {
+                'buttons': state.buttons.copy(),
+                'axes': state.axes.copy(),
+                'hats': state.hats.copy(),
+                'timestamp': time.time()
+            }
+            with open(STATE_FILE, 'wb') as f:
+                pickle.dump(state_data, f)
+        except Exception as e:
+            pass  # 静默失败，避免频繁的错误打印
 
     def _update_status_display(self):
         """更新状态显示"""

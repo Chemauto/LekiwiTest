@@ -10,6 +10,7 @@
 RealBase/
 ├── motor_controller.py      # 底盘控制器主模块
 ├── test_motor.py            # 统一的测试程序
+├── joy_control.py           # 手柄控制程序
 ├── requirements.txt         # Python依赖包列表
 ├── README.md                # 本文档
 └── motors/                  # 电机驱动模块(已包含)
@@ -69,6 +70,41 @@ python3 test_motor.py
 - 原地旋转
 - 组合运动
 - 单轮控制
+
+### 4. 手柄控制
+
+使用虚拟手柄或真实手柄控制底盘运动。
+
+**启动虚拟手柄模拟器（如果需要）：**
+```bash
+cd /home/dora/RoboOs/LekiwiTest/Project4_SimJoy
+./run.sh
+```
+
+**运行手柄控制程序：**
+```bash
+python3 joy_control.py
+
+# 或指定串口
+python3 joy_control.py --port /dev/ttyACM1
+```
+
+**控制映射：**
+| 输入 | 功能 |
+|------|------|
+| 左摇杆上下 | 前进/后退 |
+| 左摇杆左右 | 左移/右移 |
+| 右摇杆左右 | 原地旋转 |
+
+**配置参数**（在 `joy_control.py` 中修改）：
+- `LINEAR_SPEED = 0.3` - 最大平移速度 (m/s)
+- `OMEGA_SPEED = 0.8` - 最大旋转速度 (rad/s)
+- `JOYSTICK_DEADZONE = 0.1` - 手柄死区阈值
+
+**工作原理：**
+- 虚拟手柄模拟器会定期将状态写入 `/tmp/virtual_joystick_state.pkl`
+- `joy_control.py` 通过读取该文件获取手柄输入
+- 如果虚拟手柄退出，状态文件会被自动删除，机器人会自动停止
 
 ## 主要功能
 

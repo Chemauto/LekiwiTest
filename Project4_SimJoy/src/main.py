@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt5.QtWidgets import QApplication, QMainWindow
 from PyQt5.QtCore import Qt
-from src.joystick_ui import JoystickUI
+from src.joystick_ui import JoystickUI, STATE_FILE
 
 
 class MainWindow(QMainWindow):
@@ -53,6 +53,18 @@ class MainWindow(QMainWindow):
     def get_joystick(self):
         """获取虚拟手柄对象"""
         return self.joystick_ui.get_joystick()
+
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        # 清理状态文件
+        try:
+            if os.path.exists(STATE_FILE):
+                os.remove(STATE_FILE)
+                print(f"已清理状态文件: {STATE_FILE}")
+        except Exception as e:
+            pass
+        # 接受关闭事件
+        event.accept()
 
 
 def main():
